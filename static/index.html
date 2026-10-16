@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f4ef">
+  <title>Pet Portrait Studio</title>
+  <style>
+    :root { color-scheme: light; --ink:#202622; --muted:#737a73; --line:#e3e5df; --paper:#fbfbf8; --green:#245c46; --lime:#d5e6a7; --coral:#d88369; --blue:#dce9ec; }
+    * { box-sizing:border-box; }
+    [hidden] { display:none !important; }
+    body { margin:0; background:#f2f3ee; color:var(--ink); font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+    button,select,textarea { font:inherit; }
+    button { cursor:pointer; }
+    .shell { max-width:1240px; margin:auto; padding:24px 34px 50px; }
+    header { height:54px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); margin-bottom:26px; }
+    .brand { display:flex; align-items:center; gap:11px; font-weight:750; letter-spacing:.01em; }
+    .mark { width:30px; height:30px; border-radius:9px; background:var(--green); color:white; display:grid; place-items:center; font-size:16px; }
+    .status { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
+    .dot { width:8px; height:8px; background:#72976e; border-radius:50%; }
+    .intro { display:flex; align-items:end; justify-content:space-between; margin:22px 0 20px; }
+    h1 { font-size:25px; line-height:1.2; margin:0 0 6px; font-weight:720; letter-spacing:0; }
+    .intro p { color:var(--muted); margin:0; font-size:14px; }
+    .workspace { display:grid; grid-template-columns:minmax(340px,.86fr) minmax(450px,1.14fr); gap:18px; align-items:stretch; }
+    .panel { background:var(--paper); border:1px solid var(--line); border-radius:8px; min-width:0; }
+    .panel-head { height:52px; padding:0 18px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); }
+    .panel-head h2 { font-size:14px; margin:0; font-weight:680; }
+    .step { color:#8b928a; font-size:12px; }
+    .left-body { padding:17px 18px 18px; }
+    .drop { border:1px dashed #c9cec5; background:#f7f8f4; border-radius:7px; min-height:212px; display:grid; place-items:center; overflow:hidden; position:relative; transition:.15s ease; }
+    .drop.drag { border-color:var(--green); background:#edf3e7; }
+    .drop img { max-width:100%; max-height:280px; object-fit:contain; display:none; }
+    .empty { text-align:center; padding:24px; }
+    .upload-symbol { width:42px; height:42px; border-radius:12px; background:#e8ede3; color:var(--green); display:grid; place-items:center; margin:0 auto 12px; font-size:21px; }
+    .empty strong { display:block; font-size:14px; font-weight:650; }
+    .empty small { color:var(--muted); display:block; margin-top:4px; }
+    .upload-actions { margin-top:12px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .hint { font-size:12px; color:var(--muted); }
+    .button { border:1px solid #d8ddd5; border-radius:6px; padding:8px 12px; color:var(--ink); background:white; font-size:13px; font-weight:600; }
+    .button:hover { background:#f3f5ef; }
+    .button.primary { border-color:var(--green); background:var(--green); color:white; }
+    .button.primary:hover { background:#1a4c37; }
+    .button:disabled { opacity:.48; cursor:not-allowed; }
+    .field { margin-top:18px; }
+    .label-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:7px; }
+    label { font-size:13px; font-weight:650; }
+    .field select,.field textarea { width:100%; border:1px solid #dfe2db; border-radius:6px; background:white; color:var(--ink); outline:none; }
+    .field select { padding:9px 10px; }
+    .field textarea { min-height:97px; padding:10px; resize:vertical; font-size:13px; line-height:1.5; }
+    .field select:focus,.field textarea:focus { border-color:#759982; box-shadow:0 0 0 2px #245c4618; }
+    .prompt-note { color:var(--muted); font-size:11px; }
+    .generate-row { margin-top:15px; display:flex; align-items:center; gap:12px; }
+    .generate-row .primary { min-width:130px; }
+    .notice { color:var(--muted); font-size:12px; }
+    .error { color:#a24432; font-size:12px; margin-top:10px; min-height:18px; }
+    .right-panel { display:flex; flex-direction:column; min-height:620px; }
+    .result-meta { color:var(--muted); font-size:12px; }
+    .result-area { flex:1; min-height:0; display:grid; place-items:center; padding:20px; }
+    .result-empty { text-align:center; color:var(--muted); max-width:250px; }
+    .result-art { width:min(100%,440px); aspect-ratio:1; border:1px solid var(--line); border-radius:6px; overflow:hidden; display:none; background-color:#f7f8f5; background-image:linear-gradient(45deg,#e8ebe5 25%,transparent 25%),linear-gradient(-45deg,#e8ebe5 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e8ebe5 75%),linear-gradient(-45deg,transparent 75%,#e8ebe5 75%); background-size:20px 20px; background-position:0 0,0 10px,10px -10px,-10px 0; }
+    .result-art img { width:100%; height:100%; object-fit:contain; }
+    .result-footer { min-height:51px; border-top:1px solid var(--line); padding:10px 16px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+    .result-details { display:flex; align-items:center; gap:12px; color:var(--muted); font-size:12px; min-width:0; }
+    .result-details span { white-space:nowrap; }
+    .history { margin-top:24px; }
+    .history-top { display:flex; justify-content:space-between; align-items:center; padding:0 2px 11px; }
+    .history-top h2 { font-size:15px; margin:0; font-weight:700; }
+    .history-top span { color:var(--muted); font-size:12px; }
+    .history-list { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:11px; }
+    .history-item { background:var(--paper); border:1px solid var(--line); border-radius:7px; overflow:hidden; min-width:0; cursor:pointer; }
+    .history-item img { width:100%; aspect-ratio:1; object-fit:cover; display:block; background:#eef0eb; }
+    .history-caption { padding:8px 9px 9px; }
+    .history-caption strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+    .history-caption small { display:block; color:var(--muted); margin-top:3px; font-size:11px; }
+    .blank-history { grid-column:1/-1; border-top:1px solid var(--line); padding:19px 3px; color:var(--muted); font-size:13px; }
+    .busy { display:flex; flex-direction:column; align-items:center; gap:10px; color:var(--muted); }
+    .spinner { width:24px; height:24px; border:2px solid #dce2d9; border-top-color:var(--green); border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    @media (max-width:850px) { .shell{padding:16px 16px 34px}.workspace{grid-template-columns:1fr}.right-panel{min-height:520px}.history-list{grid-template-columns:repeat(4,minmax(0,1fr))} }
+    @media (max-width:520px) { .shell{padding:12px 12px 28px}header{margin-bottom:20px}.intro{align-items:start}.intro p{max-width:265px}.workspace{gap:12px}.right-panel{min-height:440px}.result-area{padding:12px}.result-footer{align-items:flex-start;flex-direction:column}.history-list{grid-template-columns:repeat(2,minmax(0,1fr))}.hint{font-size:11px} }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header><div class="brand"><span class="mark">P</span><span>Pet Portrait Studio</span></div><div class="status"><span class="dot"></span><span>本地服务已连接</span></div></header>
+    <section class="intro"><div><h1>把陪伴，变成一幅肖像</h1><p>上传一张宠物照片，生成保留真实特征的 3D 卡通形象。</p></div></section>
+    <section class="workspace">
+      <section class="panel">
+        <div class="panel-head"><h2>创作设置</h2><span class="step">01 / INPUT</span></div>
+        <div class="left-body">
+          <div class="drop" id="drop"><div class="empty" id="empty"><div class="upload-symbol">↑</div><strong>拖放宠物照片到这里</strong><small>或从设备中选择图片</small></div><img id="sourcePreview" alt="上传图片预览"></div>
+          <div class="upload-actions"><span class="hint" id="fileInfo">PNG、JPEG 或 WebP，最大 10 MB</span><button class="button" id="pick">选择图片</button><input id="file" type="file" accept="image/png,image/jpeg,image/webp" hidden></div>
+          <div class="field"><div class="label-row"><label for="model">生成模型</label></div><select id="model"></select></div>
+          <div class="field"><div class="label-row"><label for="prompt">生成提示词</label><span class="prompt-note">可按需调整</span></div><textarea id="prompt" maxlength="4000"></textarea></div>
+          <div class="generate-row"><button class="button primary" id="generate" disabled>生成肖像</button><span class="notice">预计需要几十秒</span></div>
+          <div class="error" id="error" role="status"></div>
+        </div>
+      </section>
+      <section class="panel right-panel">
+        <div class="panel-head"><h2>生成结果</h2><span class="step">02 / RESULT</span></div>
+        <div class="result-area"><div class="result-empty" id="resultEmpty">你的作品会显示在这里</div><div class="busy" id="busy" hidden><span class="spinner"></span><span>正在绘制肖像…</span></div><div class="result-art" id="resultArt"><img id="resultImage" alt="生成的宠物卡通肖像"></div></div>
+        <div class="result-footer"><div class="result-details" id="resultDetails"><span>等待开始</span></div><button class="button" id="download" disabled>下载 PNG</button></div>
+      </section>
+    </section>
+    <section class="history"><div class="history-top"><h2>最近作品</h2><span id="historySummary">最近的生成记录</span></div><div class="history-list" id="historyList"><div class="blank-history">还没有作品。完成第一次生成后，作品会保存在这里。</div></div></section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let selectedFile = null;
+    let currentImage = null;
+    const fileInput = $('file');
+    $('pick').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => setFile(fileInput.files[0]));
+    for (const eventName of ['dragenter', 'dragover']) $('drop').addEventListener(eventName, (event) => { event.preventDefault(); $('drop').classList.add('drag'); });
+    for (const eventName of ['dragleave', 'drop']) $('drop').addEventListener(eventName, (event) => { event.preventDefault(); $('drop').classList.remove('drag'); });
+    $('drop').addEventListener('drop', (event) => setFile(event.dataTransfer.files[0]));
+    function setFile(file) {
+      if (!file) return;
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) { $('error').textContent = '请选择 10 MB 以内的 PNG、JPEG 或 WebP 图片。'; return; }
+      selectedFile = file;
+      $('error').textContent = '';
+      $('fileInfo').textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`;
+      $('sourcePreview').src = URL.createObjectURL(file);
+      $('sourcePreview').style.display = 'block';
+      $('empty').style.display = 'none';
+      $('generate').disabled = false;
+    }
+    async function loadConfig() {
+      const response = await fetch('/api/config');
+      const config = await response.json();
+      $('model').innerHTML = config.models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
+      $('model').value = config.default_model;
+      $('prompt').value = config.default_prompt;
+    }
+    function escapeHtml(value) { const node = document.createElement('span'); node.textContent = value; return node.innerHTML; }
+    $('generate').addEventListener('click', generate);
+    async function generate() {
+      if (!selectedFile) return;
+      $('error').textContent = '';
+      $('generate').disabled = true;
+      $('busy').hidden = false;
+      $('resultEmpty').hidden = true;
+      $('resultArt').style.display = 'none';
+      $('resultDetails').innerHTML = '<span>生成中…</span>';
+      const form = new FormData();
+      form.append('file', selectedFile);
+      form.append('model', $('model').value);
+      form.append('prompt', $('prompt').value);
+      try {
+        const response = await fetch('/api/generate', { method: 'POST', body: form });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.detail || data.error || '生成失败，请重试。');
+        currentImage = `data:image/png;base64,${data.image_base64}`;
+        $('resultImage').src = currentImage;
+        $('resultArt').style.display = 'block';
+        $('download').disabled = false;
+        $('resultDetails').innerHTML = `<span>${escapeHtml(data.used_model)}</span><span>${data.elapsed_seconds}s</span><span>提示词 v${data.prompt_version_number}</span>${data.is_fallback ? '<span>已切换兜底模型</span>' : ''}`;
+        if (!data.history_saved) $('resultDetails').innerHTML += '<span>历史暂未保存</span>';
+        await loadHistory();
+      } catch (error) {
+        $('resultEmpty').hidden = false;
+        $('resultEmpty').textContent = error.message;
+        $('resultDetails').innerHTML = '<span>生成未完成</span>';
+        $('error').textContent = error.message;
+      } finally {
+        $('busy').hidden = true;
+        $('generate').disabled = !selectedFile;
+      }
+    }
+    $('download').addEventListener('click', () => {
+      if (!currentImage) return;
+      const link = document.createElement('a'); link.href = currentImage; link.download = 'pet-portrait.png'; link.click();
+    });
+    async function loadHistory() {
+      const response = await fetch('/api/history?limit=12');
+      const data = await response.json();
+      const items = data.items || [];
+      $('historySummary').textContent = `${items.length} 件最近作品 · 全部 ${data.summary.total_calls} 次 · 累计预估 $${Number(data.summary.total_estimated_cost_usd || 0).toFixed(4)}`;
+      if (!items.length) return;
+      $('historyList').innerHTML = items.map((item) => `<article class="history-item" data-image="${item.image_url}"><img src="${item.image_url}" loading="lazy" alt="宠物肖像"><div class="history-caption"><strong>${escapeHtml(item.used_model)}</strong><small>${new Date(item.created_at).toLocaleString()}</small></div></article>`).join('');
+      $('historyList').querySelectorAll('.history-item').forEach((card) => card.addEventListener('click', () => { currentImage = card.dataset.image; $('resultImage').src = currentImage; $('resultArt').style.display = 'block'; $('resultEmpty').hidden = true; $('download').disabled = false; $('resultDetails').innerHTML = '<span>历史作品</span>'; }));
+    }
+    loadConfig().catch(() => $('error').textContent = '无法加载服务配置，请刷新页面或检查服务状态。');
+    loadHistory().catch(() => {});
+  </script>
+</body>
+</html>

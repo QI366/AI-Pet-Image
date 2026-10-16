@@ -1,124 +1,83 @@
-# 宠物 Pixar 3D 卡通化生成器
+# Pet Portrait Studio
 
-上传真实宠物照片，调用 OpenAI 图片模型（默认 `gpt-image-1`）生成 Pixar 风格 3D 卡通形象。
+一个基于 FastAPI 和 OpenAI Images API 的宠物肖像生成应用。用户上传宠物照片后，服务调用图片编辑模型生成风格化肖像，并记录使用模型、耗时、用量估算和提示词版本。
 
-## 功能
-- 输入真实宠物图片 → 输出 Pixar 卡通 3D 形象
-- 正方形输出（1024x1024）
-- 生成结果为透明背景（PNG alpha 通道，仅 gpt-image 系列模型支持），支持"抠图"
-- 前端可自选莫兰迪色系背景色，实时预览（Canvas 合成，无需重复调用模型）
-- 支持导出 PNG（含所选背景色 / 或纯透明背景）
-- **网页端可自选生成模型**，下拉框选项来自 `.env` 中 `MODEL_IMAGE_OPTIONS` 配置
-- **兜底模型逻辑**：所选模型调用失败时，自动切换到 `.env` 中配置的 `MODEL_IMAGE_FALLBACK` 重试一次，
-  网页上会提示"已自动切换至兜底模型"
-- **历史记录**：每次生成都会落库（SQLite），网页下方"历史记录"面板可查看所有历史生成结果
-  （全局共享，不区分用户），包含缩略图（**点击可放大查看原图**）、实际使用的模型、耗时、
-  输入/输出 token 消耗、预估花费（美元）、对应的提示词版本号（可展开查看当时用的完整提示词），
-  以及累计调用次数与累计预估花费汇总
-- **提示词展示与编辑**：网页上直接展示当前生效的提示词（核心约束"Pixar 3D 卡通风格"+"尽量还原
-  宠物特征"），用户可以自由编辑（**支持点击"放大编辑"弹出大编辑框**）；编辑后的内容可另存为新版本，
-  也可以从下拉框里选择之前保存过的版本重新载入编辑；每次生成时用的提示词都会自动关联对应版本号，
-  历史记录里可以追溯
-- 网页展示本次调用**实际使用**的模型名称与耗时
-- 服务监听 `0.0.0.0:8000`，局域网内其他设备可访问
+## 项目亮点
 
-## 使用步骤
+- **完整的产品闭环**：图片上传、模型选择、提示词编辑、生成、预览下载和历史回看都在一个网页中完成。
+- **可配置的模型路由**：模型白名单由环境变量控制；主模型失败时可选地切换一次兜底模型，并记录请求模型和实际模型。
+- **可追溯的生成记录**：SQLite 保存调用元数据与提示词快照，图片按随机 ID 保存到本地文件，历史接口不暴露文件系统路径。
+- **明确的输入边界**：服务端限制上传大小、识别支持的图片签名、验证模型白名单并限制提示词长度。
+- **离线可启动**：API 密钥只在调用生成时检查；没有密钥时仍可启动服务、浏览界面和查看本地历史。
+- **成本可解释**：按可配置价格表估算费用。估算与模型服务商最终账单可能不同，未知价格会保留为空。
+
+## 架构
+
+```text
+浏览器 static/index.html
+       │ 同源 HTTP / multipart
+       ▼
+FastAPI app.py ─── OpenAI-compatible Images API
+       │
+       ├── SQLite history.db：提示词版本、生成元数据
+       └── history_images/<随机 ID>.png：生成图片
+```
+
+当前项目面向单机演示和作品集讲解：SQLite 与本地图片目录便于快速运行和检查；服务暂未提供用户认证、配额控制或多实例共享存储，因此不应直接作为公网多用户服务部署。
+
+## 快速开始
+
+需要 Python 3.11 或更新版本。
 
 ```bash
-cd pet_pixar_app
+python -m venv .venv
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+# macOS / Linux: source .venv/bin/activate
 pip install -r requirements.txt
+Copy-Item .env.example .env
+```
 
-cp .env.example .env
-# 编辑 .env，填入你的 MODEL_OPENAI_API_KEY
+在 `.env` 中设置 `MODEL_OPENAI_API_KEY`，然后启动：
 
+```bash
 python app.py
 ```
 
-启动后访问：
-- 本机：http://localhost:8000
-- 局域网其他设备：http://<你的电脑IP>:8000
+打开 <http://localhost:8000>。健康检查位于 `/health`，接口文档位于 `/docs`。没有 API 密钥时页面和历史仍可访问，但生成接口会返回 `503` 并提示配置密钥。
 
-## 遇到 "Failed to fetch" 怎么办
-这是浏览器网络层报错，一般是下面几种情况之一：
-1. **没有通过 `http://后端地址:8000` 访问页面**——比如直接双击打开了 `static/index.html` 文件。
-   请务必先 `python app.py` 启动服务，再用浏览器打开 `http://localhost:8000`（或局域网 IP）。
-2. **跨设备/跨源访问**——如果你是从另一台设备打开页面，或者页面和后端不在同一个地址，
-   请在页面顶部的"后端地址"输入框里填写后端实际地址，例如 `http://192.168.1.5:8000`，
-   填完会记在浏览器本地，下次自动带上。
-3. **后端没有启动 / 端口不对 / 防火墙拦截**——确认 `python app.py` 正常运行且没有报错。
-4. 已经加了 CORS（跨源资源共享）中间件，允许任意来源访问接口，覆盖大部分跨源场景。
+## 配置
 
-## 自选模型 / 手动输入模型
-- "生成模型"下拉框列出的是 `.env` 里 `MODEL_IMAGE_OPTIONS` 配置的模型。
-- 下拉框下方新增了一个文本框，可以手动输入任意模型名称（比如中转商提供的自定义模型名）。
-  **如果这个文本框非空，会优先于下拉框的选择**。
+| 变量 | 用途 | 默认值 |
+| --- | --- | --- |
+| `MODEL_OPENAI_API_KEY` | 图片服务凭据 | 无 |
+| `MODEL_OPENAI_BASE_URL` | OpenAI 兼容服务地址 | SDK 默认地址 |
+| `MODEL_IMAGE_NAME` | 默认生成模型 | `gpt-image-1` |
+| `MODEL_IMAGE_OPTIONS` | 允许网页选择的模型，逗号分隔 | 默认模型 |
+| `MODEL_IMAGE_FALLBACK` | 主模型失败后尝试一次的兜底模型 | 关闭 |
+| `MODEL_PRICE_TABLE_JSON` | 覆盖内置估算价格的 JSON 对象 | 内置示例价格 |
 
-## 关于模型调用
-- 使用 OpenAI 官方 SDK 的 `images.edit` 接口，将上传照片作为输入图，配合 prompt 约束风格为
-  "Pixar/Disney 3D 卡通 + 透明背景 + 正方形构图"，同时要求模型保留宠物本身的品种、毛色花纹、
-  五官特征，使生成结果仍可辨认是同一只宠物。
-- `background="transparent"` 参数只对 `gpt-image` 系列模型生效；如果下拉框选择的是
-  `dall-e-2` / `dall-e-3` 等模型，代码会自动跳过该参数（这些模型的 `images.edit` 接口不支持
-  透明背景），网页上会提示"当前模型不支持透明背景参数"。
-- **自选模型**：网页"生成模型"下拉框的选项来自 `.env` 的 `MODEL_IMAGE_OPTIONS`（逗号分隔），
-  默认选中 `MODEL_IMAGE_NAME`。
-- **兜底模型**：如果所选模型调用报错（限流、不支持、临时故障等），后端会自动用
-  `.env` 的 `MODEL_IMAGE_FALLBACK` 重试一次，成功后网页会提示"已自动切换至兜底模型"，
-  并在"模型"字段显示实际生成所用的模型名。若两次都失败，才会把最后一次的报错返回给前端。
-- 若你使用的是第三方中转 / 兼容 OpenAI 协议的服务，在 `.env` 中配置 `MODEL_OPENAI_BASE_URL` 即可，
-  无需改动代码。
+不要把真实密钥提交到 Git。`.env`、虚拟环境、生成图片与日志已加入 `.gitignore`。
 
-## 关于提示词版本管理
-- 提示词存在 `history.db` 的 `prompt_versions` 表里，首次启动会自动把内置默认提示词存为 **v1**。
-- 网页上"提示词"文本框可以直接编辑；点击"保存为新版本"会显式保存一条记录（内容完全相同的
-  提示词会复用已有版本号，不会产生重复版本）。
-- 即使不手动点"保存"，只要生成时用的提示词内容和已有版本不完全一致，后端也会自动为它创建一个
-  新版本，并把版本号关联到这次生成的历史记录里。
-- 下拉框"选择已保存的提示词版本…"可以把之前任意一个版本重新载入到文本框，方便在其基础上继续改。
-- 历史记录卡片里"查看提示词内容"可以展开看当时那次生成实际用的完整提示词文本。
+## API 概览
 
-## 关于历史记录与费用估算
-- 历史数据存储在项目根目录下自动生成的 `history.db`（SQLite）和 `history_images/`（生成的 PNG 图片），
-  首次运行会自动创建，无需手动建表。
-- **不区分用户**：所有调用记录都写入同一张表，任何打开网页的人都能看到全部历史（没有做登录/权限隔离，
-  如果需要按用户区分，需要额外加鉴权和 `user_id` 字段，当前版本未实现）。
-- **Token 用量**：仅 `gpt-image-1` 系列模型的响应里带 `usage`（`input_tokens` / `output_tokens` / `total_tokens`）；
-  `dall-e-2` / `dall-e-3` 走按张计费，没有 token 概念，历史记录里会显示为 `-`。
-- **费用估算**：价格表写在 `app.py` 的 `DEFAULT_PRICE_TABLE`（**仅供参考，不代表真实账单**）。
-  gpt-image 系列区分"文本 token"和"图片 token"两种单价：
-  ```python
-  "gpt-image-1": {
-      "input_per_1k": 0.0025,        # 文本输入 token 单价
-      "output_per_1k": 0,            # 文本输出 token 单价（图片生成场景基本用不到）
-      "image_input_per_1k": 0.01,    # 图片输入 token 单价
-      "image_output_per_1k": 0.04,   # 图片输出 token 单价
-  }
-  ```
-  计算逻辑：OpenAI 返回的 `usage.input_tokens_details` 里会区分 `text_tokens`（文本）和
-  `image_tokens`（图片），分别乘以对应单价；`output_tokens`（生成的图片本身）按
-  `image_output_per_1k` 计价。如果某个模型只配置了 `input_per_1k`/`output_per_1k`（比如
-  `gpt-image-1-mini`），就统一按这两个字段估算。
-  可以通过 `.env` 里的 `MODEL_PRICE_TABLE_JSON` 覆盖，例如：
-  ```
-  MODEL_PRICE_TABLE_JSON={"dall-e-3":{"flat_per_image":0.06}}
-  ```
-  找不到价格的模型，费用会显示"未知"。**请务必对照你实际使用的渠道/中转商账单核实价格**，
-  这里的默认数字只是占位示例。
+- `GET /api/config`：网页可用的模型和默认提示词。
+- `GET /api/prompts`、`POST /api/prompts`：查询或保存提示词版本。
+- `POST /api/generate`：以 multipart 上传 `file`，并提交 `model`、`prompt`。
+- `GET /api/history?limit=12`：读取最近生成记录和当前结果集的费用汇总。
+- `GET /api/history/image/{id}`：读取历史图片。
 
-## 目录结构
-```
-pet_pixar_app/
-├── app.py              # FastAPI 后端
-├── static/index.html   # 前端页面（上传/预览/换色/导出/历史记录）
-├── requirements.txt
-├── .env.example
-├── README.md
-├── history.db           # 运行后自动生成：历史记录数据库
-└── history_images/      # 运行后自动生成：历史生成图片
+上传最大 10 MB，支持 PNG、JPEG、WebP。模型必须出现在服务端配置的 `MODEL_IMAGE_OPTIONS` 中。
+
+## 测试
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
 ```
 
-## 注意事项
-- 部分中转/代理商可能不支持 `images.edit` 或 `background=transparent` 参数，若报错请先确认
-  服务商对 gpt-image-1 相关能力的支持情况。
-- 若生成的图片背景仍有残留（非纯透明），可以在前端"导出 PNG（透明背景）"版本基础上，用
-  Photoshop / remove.bg 等工具二次抠图。
+图像模型调用在测试中替换为确定性本地桩，不需要真实密钥或外部 API。测试验证 HTTP 行为、输入校验、提示词关联、图片历史读取和模型兜底顺序。
+
+## 面试介绍建议
+
+可以按“业务闭环 → 服务端边界 → 失败恢复与可观测性 → 当前取舍”介绍：网页负责体验与预览，FastAPI 管理校验和模型调用，SQLite 保存可追溯记录；生成链路记录实际模型、耗时、用量和提示词版本，主模型失败后按配置进行一次兜底。当前是单用户本地作品集项目，下一阶段可围绕身份隔离、任务队列、对象存储和端到端部署验证继续演进。

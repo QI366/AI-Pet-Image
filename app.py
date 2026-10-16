@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -18,8 +19,7 @@ from io import BytesIO
 from pathlib import Path  # 仍用于读取 static/index.html
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from openai import OpenAI
 
@@ -28,6 +28,7 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 load_dotenv()  # 默认读取当前工作目录下的 .env
 
+logger = logging.getLogger(__name__)
 API_KEY = os.getenv("MODEL_OPENAI_API_KEY")
 BASE_URL = os.getenv("MODEL_OPENAI_BASE_URL") or None  # 如走中转/代理可在 .env 中配置
 
@@ -49,43 +50,27 @@ if DEFAULT_MODEL not in MODEL_OPTIONS:
 if FALLBACK_MODEL and FALLBACK_MODEL not in MODEL_OPTIONS:
     MODEL_OPTIONS.append(FALLBACK_MODEL)
 
-if not API_KEY:
-    raise RuntimeError(
-        "未找到 MODEL_OPENAI_API_KEY，请在项目根目录创建 .env 文件并配置，"
-        "参考 .env.example"
-    )
-
-_client_kwargs = {"api_key": API_KEY}
-if BASE_URL:
-    _client_kwargs["base_url"] = BASE_URL
-
-client = OpenAI(**_client_kwargs)
+def _get_client() -> OpenAI:
+    """Defer credential validation until generation so the demo UI works offline."""
+    api_key = os.getenv("MODEL_OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="图片生成尚未配置，请在 .env 中设置 MODEL_OPENAI_API_KEY。",
+        )
+    client_kwargs = {"api_key": api_key}
+    base_url = os.getenv("MODEL_OPENAI_BASE_URL")
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    return OpenAI(**client_kwargs)
 
 app = FastAPI(title="宠物 Pixar 化生成器")
 
-# 允许跨源访问：
-# - 有些人会直接双击打开 static/index.html（file:// 源）而不是通过 http://host:8000 访问，
-#   或者从局域网内另一台设备访问，这些情况下浏览器会因为"跨源"拦截 fetch 请求，
-#   报错通常表现为一个模糊的 "Failed to fetch"。加上 CORS 中间件可以避免这个问题。
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    """
-    兜底异常处理：防止任何未预料到的异常（比如磁盘写历史记录失败）导致连接被直接断开，
-    那种情况下前端会看到无法定位原因的 "Failed to fetch"，而不是一条可读的错误信息。
-    """
-    return JSONResponse(
-        {"ok": False, "error": f"服务器内部错误：{exc}"},
-        status_code=500,
-    )
+async def unhandled_exception_handler(request, exc: Exception):
+    logger.exception("Unhandled request error on %s", request.url.path)
+    return JSONResponse({"ok": False, "error": "服务器暂时无法完成请求，请稍后重试。"}, status_code=500)
 
 # ---------------------------------------------------------------------------
 # 价格表（仅供估算参考，不代表实际账单！不同渠道/中转商计费可能不同）
@@ -401,7 +386,7 @@ def _call_image_model(model_name: str, image_bytes: bytes, filename: str, prompt
     if transparent_requested:
         kwargs["background"] = "transparent"
 
-    result = client.images.edit(**kwargs)
+    result = _get_client().images.edit(**kwargs)
     usage = _extract_usage(result)
     return result.data[0].b64_json, transparent_requested, usage
 
@@ -409,6 +394,11 @@ def _call_image_model(model_name: str, image_bytes: bytes, filename: str, prompt
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return (BASE_DIR / "static" / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/health")
+def health():
+    return {"ok": True, "service": "ai-pet-image"}
 
 
 @app.get("/api/config")
@@ -434,6 +424,8 @@ async def create_prompt(content: str = Form(...)):
     显式保存一个新的提示词版本（不触发生成）。
     内容和已有版本完全一致时会直接复用那个版本号，不会产生重复版本。
     """
+    if len(content) > 4000:
+        raise HTTPException(status_code=422, detail="提示词不能超过 4000 个字符。")
     version = get_or_create_prompt_version(content)
     return {"ok": True, "version": version}
 
@@ -446,10 +438,21 @@ async def generate(file: UploadFile = File(...), model: str = Form(None), prompt
     提示词若和已有版本内容不同，会自动保存为新版本；成功后落库历史记录
     （模型、耗时、token 消耗、预估费用、提示词版本），返回 base64 PNG。
     """
-    image_bytes = await file.read()
+    image_bytes = await file.read(10 * 1024 * 1024 + 1)
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="图片不能超过 10 MB。")
+    signatures = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"RIFF")
+    if not image_bytes or not image_bytes.startswith(signatures):
+        raise HTTPException(status_code=415, detail="请上传有效的 PNG、JPEG 或 WebP 图片。")
+    if image_bytes.startswith(b"RIFF") and image_bytes[8:12] != b"WEBP":
+        raise HTTPException(status_code=415, detail="请上传有效的 PNG、JPEG 或 WebP 图片。")
     filename = file.filename or "upload.png"
 
     requested_model = (model or DEFAULT_MODEL).strip()
+    if requested_model not in MODEL_OPTIONS:
+        raise HTTPException(status_code=422, detail="所选模型不在服务端允许的模型列表中。")
+    if prompt and len(prompt) > 4000:
+        raise HTTPException(status_code=422, detail="提示词不能超过 4000 个字符。")
     prompt_version = get_or_create_prompt_version(prompt or PROMPT_TEMPLATE)
     prompt_text = prompt_version["content"]
 
@@ -458,12 +461,12 @@ async def generate(file: UploadFile = File(...), model: str = Form(None), prompt
         attempt_order.append(FALLBACK_MODEL)
 
     errors = []
-    start = time.time()
+    start = time.perf_counter()
 
     for idx, m in enumerate(attempt_order):
         try:
             b64, transparent, usage = _call_image_model(m, image_bytes, filename, prompt_text)
-            elapsed = round(time.time() - start, 2)
+            elapsed = round(time.perf_counter() - start, 2)
             is_fallback = idx > 0
 
             # 历史记录写入失败（磁盘/数据库问题）不应该影响已经生成成功的图片返回给用户，
@@ -481,7 +484,7 @@ async def generate(file: UploadFile = File(...), model: str = Form(None), prompt
                 )
                 history_saved = True
             except Exception as history_err:  # noqa: BLE001
-                print(f"警告：历史记录写入失败：{history_err}")
+                logger.exception("History persistence failed", exc_info=history_err)
                 record = {
                     "id": None, "input_tokens": (usage or {}).get("input_tokens"),
                     "output_tokens": (usage or {}).get("output_tokens"),
@@ -510,10 +513,13 @@ async def generate(file: UploadFile = File(...), model: str = Form(None), prompt
                 }
             )
         except Exception as e:  # noqa: BLE001 - 记录后继续尝试下一个模型
-            errors.append({"model": m, "error": str(e)})
+            if isinstance(e, HTTPException):
+                raise
+            logger.warning("Image generation attempt failed for model %s: %s", m, type(e).__name__)
+            errors.append({"model": m, "error": "模型调用失败，请检查模型配置或服务商状态。"})
             continue
 
-    elapsed = round(time.time() - start, 2)
+    elapsed = round(time.perf_counter() - start, 2)
     return JSONResponse(
         {
             "ok": False,
@@ -560,9 +566,12 @@ def get_history(limit: int = 60):
             }
         )
 
-    # 汇总统计：总调用次数、总耗时、总 token、总预估费用
-    total_cost = sum(i["estimated_cost_usd"] or 0 for i in items)
-    total_calls = len(items)
+    # Aggregate over all records, independent of the page size returned above.
+    conn = sqlite3.connect(DB_PATH)
+    total_calls, total_cost = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(estimated_cost_usd), 0) FROM history"
+    ).fetchone()
+    conn.close()
 
     return {
         "items": items,
